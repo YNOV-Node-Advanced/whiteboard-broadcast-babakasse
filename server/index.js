@@ -3,9 +3,6 @@ const express = require("express");
 const http = require("http");
 const WebSocket = require("ws");
 const uuidv4 = require("uuid/v4");
-const redis = require("redis");
-const redisPublisher = redis.createClient();
-const redisSubscriber = redis.createClient();
 
 const app = express();
 
@@ -33,10 +30,6 @@ function subscribe(socket, channel) {
 
     socketsPerChannels.set(channel, socketSubscribed);
     channelsPerSocket.set(socket, channelSubscribed);
-
-    if (socketSubscribed.size === 1) {
-        redisSubscriber.subscribe(channel);
-    }
 }
 
 /*
@@ -51,10 +44,6 @@ function unsubscribe(socket, channel) {
 
     socketsPerChannels.set(channel, socketSubscribed);
     channelsPerSocket.set(socket, channelSubscribed);
-
-    if (socketSubscribed.size === 0) {
-        redisSubscriber.unsubscribe(channel);
-    }
 }
 
 /*
@@ -68,21 +57,20 @@ function unsubscribeAll(socket) {
     });
 }
 
-function broadcast(channel, data) {
-    redisPublisher.publish(channel, data);
-}
-
-redisSubscriber.on("message", (channel, message) => {
+/*
+ * Broadcast a message to all sockets connected to this server.
+ */
+function broadcastToSockets(channel, data) {
     const socketSubscribed = socketsPerChannels.get(channel) || new Set();
 
     socketSubscribed.forEach(client => {
-        client.send(message);
+        client.send(data);
     });
-});
+}
 
 // Broadcast message from client
 wss.on("connection", ws => {
-    ws.on("close", () => {
+    ws.on('close', () => {
         unsubscribeAll(ws);
     });
 
@@ -90,11 +78,11 @@ wss.on("connection", ws => {
         const message = JSON.parse(data.toString());
 
         switch (message.type) {
-            case "subscribe":
+            case 'subscribe':
                 subscribe(ws, message.channel);
                 break;
             default:
-                broadcast(message.channel, data);
+                broadcastToSockets(message.channel, data);
                 break;
         }
     });
@@ -116,5 +104,5 @@ app.get("/:channel", (req, res, next) => {
 app.use(express.static(PUBLIC_FOLDER));
 
 server.listen(PORT, () => {
-    console.log(`Server started on http://localhost:${server.address().port}`);
+    console.log(`Server started on port ${server.address().port}`);
 });
